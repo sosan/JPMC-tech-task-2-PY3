@@ -1,0 +1,292 @@
+From 0ea82980a61ac90d1404b809de43bce76be18e0f Mon Sep 17 00:00:00 2001
+From: jose luis <josloe@gmail.com>
+Date: Wed, 17 Mar 2021 18:39:01 +0100
+Subject: [PATCH] Create Patch File
+
+---
+ src/App.tsx   | 110 ++++++++++++++++++++++++++++++++++++++++++++++----
+ src/Graph.tsx |  84 +++++++++++++++++++++++++++++++++-----
+ 2 files changed, 178 insertions(+), 16 deletions(-)
+
+diff --git a/src/App.tsx b/src/App.tsx
+index 0728518..46c602a 100755
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -2,12 +2,16 @@ import React, { Component } from 'react';
+ import DataStreamer, { ServerRespond } from './DataStreamer';
+ import Graph from './Graph';
+ import './App.css';
++import { clearInterval, setInterval } from 'timers';
++
+ 
+ /**
+  * State declaration for <App />
+  */
+ interface IState {
+   data: ServerRespond[],
++  isRunningStreamingData: Boolean,
++  textStreaming: String
+ }
+ 
+ /**
+@@ -22,25 +26,117 @@ class App extends Component<{}, IState> {
+       // data saves the server responds.
+       // We use this state to parse data down to the child element (Graph) as element property
+       data: [],
++      //control if timer should be running or not
++      isRunningStreamingData: false,
++      textStreaming: "Start Streaming Data"
+     };
++
++    // bind `this` to method handleserverresponses
++    // this way we can use this.state
++    this.handleTimer = this.handleTimer.bind(this);
++
++    // bind `this` to method handleserverresponses
++    // this way we can use this.state
++    this.handleServerResponses = this.handleServerResponses.bind(this);
++
+   }
++  //timer control, definition mehh
++  timer: ReturnType<typeof setInterval> | undefined;
+ 
+   /**
+    * Render Graph react component with state.data parse as property data
+    */
+   renderGraph() {
+-    return (<Graph data={this.state.data}/>)
++    return (<Graph data={this.state.data} />)
+   }
+ 
++  /**
++   * When it's closed remove timer
++   */
++  componentWillUnmount() 
++  {
++    this.removeTimer();
++  }
++
++
+   /**
+    * Get new data from server and update the state with the new data
+    */
+-  getDataFromServer() {
+-    DataStreamer.getData((serverResponds: ServerRespond[]) => {
++  async getDataFromServer() {
++    
++    let isRunning = !this.state.isRunningStreamingData;
++
++
++    //controlling is on/off streaming
++    this.setState({ isRunningStreamingData: isRunning });
++
++
++    //update text button
++    this.updateTextButton(isRunning);
++
++    if (this.state.isRunningStreamingData === true)
++    {
++      this.removeTimer();
++    }
++    else
++    {
++      // begin timer from 100ms
++      this.timer = await setInterval(this.handleTimer, 100);
++    }
++
++  }
++
++  async handleTimer()
++  {
++    // when server python finnished to read all data
++    //error getting stocks...reinitalizing app
++    DataStreamer.getData(this.handleServerResponses);
++
++  }
++
++  removeTimer()
++  {
++    clearInterval(this.timer as ReturnType<typeof setInterval>);
++    
++    this.setState({ isRunningStreamingData: false, data: [] });
++    this.updateTextButton(false);
++
++  }
++
++  handleServerResponses(serverResponds: ServerRespond[])
++  {
++    // case no data, remove timer and update state Button
++    if (serverResponds === undefined) {
++      this.removeTimer();
++    }
++    else {
++
+       // Update the state by creating a new array of data that consists of
+       // Previous data in the state and the new data from server
+-      this.setState({ data: [...this.state.data, ...serverResponds] });
+-    });
++      let newDataRepeated: ServerRespond[] = [];
++      // pushed before data to array
++      newDataRepeated.push(...this.state.data);
++      // pushed new data to array
++      newDataRepeated.push(...serverResponds);
++      this.setState({ data: newDataRepeated });
++      
++      // this.setState({ data: [...this.state.data, ...serverResponds] });
++    }
++
++  }
++
++  /**
++   * Update text Buttton
++   * Pass parameter ?
++   */
++  updateTextButton(isRunningStreamingData: Boolean)
++  {
++    if (isRunningStreamingData === true) {
++      this.setState({ textStreaming: "Stop Streaming Data" });
++    }
++    else {
++      this.setState({ textStreaming: "Start Streaming Data" });
++    }
+   }
+ 
+   /**
+@@ -59,8 +155,8 @@ class App extends Component<{}, IState> {
+             // As part of your task, update the getDataFromServer() function
+             // to keep requesting the data every 100ms until the app is closed
+             // or the server does not return anymore data.
+-            onClick={() => {this.getDataFromServer()}}>
+-            Start Streaming Data
++            onClick={() => { this.getDataFromServer() }}>
++            {this.state.textStreaming}
+           </button>
+           <div className="Graph">
+             {this.renderGraph()}
+diff --git a/src/Graph.tsx b/src/Graph.tsx
+index ec1430e..137db8b 100644
+--- a/src/Graph.tsx
++++ b/src/Graph.tsx
+@@ -1,8 +1,9 @@
+ import React, { Component } from 'react';
+-import { Table } from '@jpmorganchase/perspective';
++import { AggregateConfig, Table, ViewConfig,  } from '@jpmorganchase/perspective';
+ import { ServerRespond } from './DataStreamer';
+ import './Graph.css';
+ 
++
+ /**
+  * Props declaration for <Graph />
+  */
+@@ -18,6 +19,16 @@ interface PerspectiveViewerElement {
+   load: (table: Table) => void,
+ }
+ 
++/**
++ * Schema declaration Interface
++ */
++interface SchemaServerRespond {
++  stock: String,
++  top_ask_price: Number,
++  top_bid_price: Number,
++  timestamp: Date,
++}
++
+ /**
+  * React component that renders Perspective based on data
+  * parsed from its parent through data property.
+@@ -46,28 +57,83 @@ class Graph extends Component<IProps, {}> {
+     }
+     if (this.table) {
+       // Load the `table` in the `<perspective-viewer>` DOM reference.
++      const elemDom: HTMLElement = elem as unknown as HTMLElement;
++      elemDom.setAttribute("view", "xy_line");
++      elemDom.setAttribute("column-pivots", `["stock"]`);
++      elemDom.setAttribute("sort", `["timestamp"]`);
++      elemDom.setAttribute("columns", `["timestamp","top_ask_price"]`);
++      elemDom.setAttribute("aggregates", `{"stock":"distinct count","top_ask_price":"sum","top_bid_price":"sum","timestamp":"distinct count"}`);
+ 
+       // Add more Perspective configurations here.
++      const viewConfig: ViewConfig = {
++        column_pivot: ["stock"],
++        row_pivot: [],
++        sort: ["timestamp"],
++        aggregate: [ 
++          { column: "stock", op: "distinct count" } as AggregateConfig,
++          { column: "top_ask_price", op: "sum" } as AggregateConfig,
++          { column: "top_bid_price", op: "sum" } as AggregateConfig,
++          { column: "timestamp", op: "distinct count" } as AggregateConfig,
++        ]
++
++      };
++
++      const tableView = this.table.view(viewConfig);
++
+       elem.load(this.table);
+     }
+   }
+ 
+-  componentDidUpdate() {
++  async componentDidUpdate() {
+     // Everytime the data props is updated, insert the data into Perspective table
+     if (this.table) {
+       // As part of the task, you need to fix the way we update the data props to
+       // avoid inserting duplicated entries into Perspective table again.
+-      this.table.update(this.props.data.map((el: any) => {
++      const uniqueElements = await this.getUniqueElements(this.props.data);
++      this.table.update(uniqueElements);
++
++    }
++  }
++
++  async getUniqueElements(data: ServerRespond[])
++  {
++
++    let dataNotRepeated: ServerRespond[] = [];
++
++    // filter array from repeteaded
++    for (let i = 0; i < data.length; i++) {
++
++      let elementRepeated = false;
++      for (let j = 0; j < data.length; j++) {
++        if (i === j) continue;
++        if (data[i].timestamp === data[j].timestamp &&
++          data[i].stock === data[j].stock
++        ) {
++          elementRepeated = true;
++          break;
++        }
++      }
++
++      if (elementRepeated === false) {
++
+         // Format the data from ServerRespond to the schema
+-        return {
+-          stock: el.stock,
+-          top_ask_price: el.top_ask && el.top_ask.price || 0,
+-          top_bid_price: el.top_bid && el.top_bid.price || 0,
+-          timestamp: el.timestamp,
++        const elementServerRespond: SchemaServerRespond = {
++          stock: data[i].stock,
++          top_ask_price: data[i].top_ask && data[i].top_ask.price || 0,
++          top_bid_price: data[i].top_bid && data[i].top_bid.price || 0,
++          timestamp: data[i].timestamp
+         };
+-      }));
++
++        dataNotRepeated.push(elementServerRespond as unknown as ServerRespond);
++
++      }
+     }
++
++    return dataNotRepeated;
++
+   }
++
++
+ }
+ 
+ export default Graph;
+-- 
+2.30.1.windows.1
+
